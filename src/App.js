@@ -1,24 +1,17 @@
+/* eslint-disable no-unused-expressions */
 import { Canvas, useFrame, useLoader, useThree } from "@react-three/fiber";
 import { forwardRef, useEffect, useMemo, useRef, useState } from "react";
-import {
-  TextureLoader,
-  Vector2,
-  WebGLRenderTarget,
-  WebGLRenderer,
-} from "three";
+import { TextureLoader, Vector2, Vector3, WebGLRenderTarget } from "three";
 import "./App.css";
-import fragmentWaveShader from "./shader/morph/fragmentShader";
-import vertexWaveShader from "./shader/morph/vertexShader";
-import fragmentShader2 from "./shader/shampain/fragmentShader";
-import vertexShader2 from "./shader/shampain/vertexShader";
-import { useTexture, useVideoTexture } from "@react-three/drei";
-import PostFX from "./components/PostFX";
 import Post from "./components/Post";
-import { EffectComposer, Glitch, Sepia } from "@react-three/postprocessing";
-import { GlitchMode } from "postprocessing";
-import { RippleEffect } from "./effects/Ripple";
-import { BadTVEffect } from "./effects/BadTV";
-import { useControls } from "leva";
+import PostFX from "./components/PostFX";
+import defaultEffect from "./shader/morph/default.effect";
+import mainFragment from "./shader/morph/main.fragment";
+import morphEffect from "./shader/morph/morph.effect";
+import oldEffect from "./shader/morph/old.effect";
+import variableFragment from "./shader/morph/variable.fragment";
+import vertexShader from "./shader/morph/vertexShader";
+import waveEffect from "./shader/morph/wave.effect";
 
 const BlockComponent = forwardRef(({ setBlockState }, ref) => {
   // This reference will give us direct access to the mesh
@@ -30,20 +23,32 @@ const BlockComponent = forwardRef(({ setBlockState }, ref) => {
 
   const uniforms = useMemo(
     () => ({
-      iChannel0: { value: imageTexture1 },
       iResolution: {
-        value: new Vector2(window.innerWidth / 2, window.innerHeight / 2),
+        value: new Vector3(window.innerWidth, window.innerHeight, 1),
       },
+      iChannel0: { value: imageTexture2 },
+      iChannel1: { value: imageTexture2 },
       iMouse: { value: new Vector2(0, 0) },
       iVelo: { value: 0.0 },
       iTime: { value: 0 },
+      showEffect: { value: 0.0 },
     }),
-    []
+    [imageTexture2]
   );
 
   useFrame((state, delta) => {
     mesh.current.material.uniforms.iTime.value += delta;
   });
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      mesh.current.material.uniforms.showEffect.value = 1.0;
+    }, 3000);
+
+    () => {
+      clearTimeout(timeout);
+    };
+  }, []);
 
   return (
     <mesh
@@ -52,11 +57,17 @@ const BlockComponent = forwardRef(({ setBlockState }, ref) => {
       // rotation={[-Math.PI / 2, 0, 0]}
       // scale={1.5}
     >
-      <axesHelper />
       <planeGeometry args={[5, 5, 1, 1]} />
       <shaderMaterial
-        fragmentShader={fragmentWaveShader}
-        vertexShader={vertexWaveShader}
+        fragmentShader={[
+          variableFragment,
+          waveEffect,
+          oldEffect,
+          defaultEffect,
+          morphEffect,
+          mainFragment,
+        ].join(" ")}
+        vertexShader={vertexShader}
         uniforms={uniforms}
       />
     </mesh>

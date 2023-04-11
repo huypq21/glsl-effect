@@ -1,18 +1,7 @@
-const fragmentShader = `
-uniform vec3      iResolution;           // viewport resolution (in pixels)
-uniform float     iTime;                 // shader playback time (in seconds)
-uniform float     iTimeDelta;            // render time (in seconds)
-uniform float     iFrameRate;            // shader frame rate
-uniform int       iFrame;                // shader playback frame
-uniform float     iChannelTime[4];       // channel playback time (in seconds)
-uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
-uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
-uniform sampler2D iChannel0;          // input channel. XX = 2D/Cube
-uniform vec4      iDate;  
+const morphEffect = `
+vec3 morphPermute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
 
-vec3 permute(vec3 x) { return mod(((x*34.0)+1.0)*x, 289.0); }
-
-float snoise(vec2 v){
+float morphSnoise(vec2 v){
   const vec4 C = vec4(0.211324865405187, 0.366025403784439,
            -0.577350269189626, 0.024390243902439);
   vec2 i  = floor(v + dot(v, C.yy) );
@@ -22,7 +11,7 @@ float snoise(vec2 v){
   vec4 x12 = x0.xyxy + C.xxzz;
   x12.xy -= i1;
   i = mod(i, 289.0);
-  vec3 p = permute( permute( i.y + vec3(0.0, i1.y, 1.0 ))
+  vec3 p = morphPermute( morphPermute( i.y + vec3(0.0, i1.y, 1.0 ))
   + i.x + vec3(0.0, i1.x, 1.0 ));
   vec3 m = max(0.5 - vec3(dot(x0,x0), dot(x12.xy,x12.xy),
     dot(x12.zw,x12.zw)), 0.0);
@@ -42,10 +31,10 @@ float snoise(vec2 v){
 //	Simplex 3D Noise 
 //	by Ian McEwan, Ashima Arts
 
-vec4 permute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
-vec4 taylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
+vec4 morphPermute(vec4 x){return mod(((x*34.0)+1.0)*x, 289.0);}
+vec4 morphTaylorInvSqrt(vec4 r){return 1.79284291400159 - 0.85373472095314 * r;}
 
-float snoise(vec3 v){ 
+float morphSnoise(vec3 v){ 
   const vec2  C = vec2(1.0/6.0, 1.0/3.0) ;
   const vec4  D = vec4(0.0, 0.5, 1.0, 2.0);
 
@@ -66,7 +55,7 @@ float snoise(vec3 v){
 
 // Permutations
   i = mod(i, 289.0 ); 
-  vec4 p = permute( permute( permute( 
+  vec4 p = morphPermute( morphPermute( morphPermute( 
              i.z + vec4(0.0, i1.z, i2.z, 1.0 ))
            + i.y + vec4(0.0, i1.y, i2.y, 1.0 )) 
            + i.x + vec4(0.0, i1.x, i2.x, 1.0 ));
@@ -101,7 +90,7 @@ float snoise(vec3 v){
   vec3 p3 = vec3(a1.zw,h.w);
 
 //Normalise gradients
-  vec4 norm = taylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
+  vec4 norm = morphTaylorInvSqrt(vec4(dot(p0,p0), dot(p1,p1), dot(p2, p2), dot(p3,p3)));
   p0 *= norm.x;
   p1 *= norm.y;
   p2 *= norm.z;
@@ -114,56 +103,28 @@ float snoise(vec3 v){
                                 dot(p2,x2), dot(p3,x3) ) );
 }
 
-float rand(float n){return fract(sin(n) * 43758.5453123);}
+float morphRand(float n){return fract(sin(n) * 43758.5453123);}
 
-float noise(float p){
+float morphNoise(float p){
 	float fl = floor(p);
   float fc = fract(p);
-	return mix(rand(fl), rand(fl + 1.0), fc);
+	return mix(morphRand(fl), morphRand(fl + 1.0), fc);
 }
 
-vec4 effect1(){
-  vec2 uv = gl_FragCoord.xy / iResolution.xy;
+vec4 morphEffect(){
+  vec2 uv = vUv;
 
     //float n = 1.5;
-    float n = noise(gl_FragCoord.y + iTime);
-    float sdist = snoise(vec2(0.0, uv.y * 8.0 + iTime * 2.0));
+    float n = morphNoise(gl_FragCoord.y + iTime);
+    float sdist = morphSnoise(vec2(0.0, uv.y * 8.0 + iTime * 2.0));
     float size = max(0.0, sin(iTime * 12.0) * 0.25 );
-    uv.x += size * sdist * snoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
-    vec2 uv_r = uv + size * 0.1 * sdist * snoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
-    vec2 uv_b = uv - size * 0.05 * sdist * snoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
-    vec4 r = texture(iChannel0, uv_r);
-    vec4 g = texture(iChannel0, uv);
-    vec4 b = texture(iChannel0, uv_b);
+    uv.x += size * sdist * morphSnoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
+    vec2 uv_r = uv + size * 0.1 * sdist * morphSnoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
+    vec2 uv_b = uv - size * 0.05 * sdist * morphSnoise(vec3(vec2(uv.x, floor(gl_FragCoord.y / n) * n) + vec2(iTime * 4.4, iTime * 0.2), iTime * 0.4));
+    vec4 r = texture2D(iChannel0, uv_r);
+    vec4 g = texture2D(iChannel0, uv);
+    vec4 b = texture2D(iChannel0, uv_b);
     return vec4(r.r, g.g, b.b, 1.0);
-}
+}`;
 
-vec4 effect2(){
-  float time = iTime;
-    
-  vec2 uv = gl_FragCoord.xy / iResolution.xy;
-  vec2 center = vec2(0.0);
-  vec2 coord = uv;
-  vec2 centered_coord = 2.0*uv-1.0;
-
-  float shutter = 0.9;
-  float texelDistance = distance(center, centered_coord);
-  float dist = 1.41*1.41*shutter - texelDistance;
-
-  float ripples = 1.0- sin(texelDistance*32.0 - 2.0*time);
-  coord -= normalize(centered_coord-center)*clamp(ripples,0.0,1.0)*0.050;
-    
-  vec4 color = texture(iChannel0, coord);
-  return vec4(color.rgba*dist);
-}
-
-void main()
-{
-  vec4 effectWave = effect2();
-  vec4 effectMorph = effect1();
-  
-  gl_FragColor = 0.5 * (effectMorph + effectWave);
-}
-`;
-
-export default fragmentShader;
+export default morphEffect;

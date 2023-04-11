@@ -1,107 +1,90 @@
 const fragmentShader = `
-uniform sampler2D uTexture;
-uniform float uTime;
-uniform float uVelo;
-uniform vec2 resolution;
-float SEQUENCE_LENGTH = 24.0;
-float FPS = 12.0;
+uniform vec3      iResolution;
+uniform float     iTime;                 // shader playback time (in seconds)
+uniform float     iTimeDelta;            // render time (in seconds)
+uniform float     iFrameRate;            // shader frame rate
+uniform int       iFrame;                // shader playback frame
+uniform float     iChannelTime[4];       // channel playback time (in seconds)
+uniform vec3      iChannelResolution[4]; // channel resolution (in pixels)
+uniform vec4      iMouse;                // mouse pixel coords. xy: current (if MLB down), zw: click
+uniform sampler2D iChannel0;          // input channel. XX = 2D/Cube
+uniform sampler2D iChannel1;   
+uniform vec4      iDate;  
+uniform int showEffect;
+varying vec2 vUv;
 
-vec4 vignette(vec2 uv, float time) 
+#define int2 vec2
+#define float2 vec2
+#define int3 vec3
+#define float3 vec3
+#define int4 vec4
+#define float4 vec4
+#define frac fract
+#define float2x2 mat2
+#define float3x3 mat3
+#define float4x4 mat4
+#define lerp mix
+#define CurrentTime (iTime)
+#define sincos(x,s,c) s = sin(x),c = cos(x)
+#define mul(x,y) (x*y)
+#define atan2 atan
+#define fmod mod
+#define static
+
+float2 hash(float2 p)
 {
-    uv *=  1.0 - uv.yx;   
-    float vig = uv.x*uv.y * 15.0;
-    float t = sin(time * 23.) * cos(time * 8. + .5);
-    vig = pow(vig, 0.4 + t * .05);
-    return vec4(vig);
+    float3 p3 = frac(float3(p.xyx) * float3(166.1031, 147.1030, 142.0973));
+    p3 += dot(p3, p3.yzx + 33.33);
+    return frac((p3.xx + p3.yz) * p3.zy);
 }
 
-float easeIn(float t0, float t1, float t) 
+float simplexNoise(float2 uv)
 {
-	return 2.0*smoothstep(t0,2.*t1-t0,t);
+    const float k1 = 0.366025f;
+    const float k2 = 0.211324f;
+
+    int2 idx = floor(uv + (uv.x + uv.y) * k1);
+    float2 a = uv - (float2(idx) - float(idx.x + idx.y) * k2);
+    int2 tb = a.y > a.x ? int2(0, 1) : int2(1, 0);
+    float2 b = a - tb + k2;
+    float2 c = a - 1.f + k2 * 2.f;
+    
+    float3 kernel = max(0.5f - float3(dot(a, a), dot(b, b), dot(c, c)), 0.f);
+    float3 noise = kernel * kernel * kernel * kernel * 
+    float3(dot(a, hash(idx)*2.f-1.), 
+           dot(b, hash(idx + tb)*2.-1.), 
+           dot(c, hash(idx + 1.f)*2.-1.));
+    
+    return dot(float3(70.f), noise);
 }
 
-vec4 blackAndWhite(vec4 color) 
+
+float verticalLine(float2 uv, float time)
 {
-    return vec4(dot(color.xyz, vec3(.299, .587, .114)));
+    float uvX = uv.x + time*0.0000003;
+    float2 xHash = hash(float2(uvX,uvX));
+    float vertical = step(0.9999993,sin(uvX*1000.0 * (xHash.x*0.01+0.01)));
+    
+    float uvY = uv.y + time*0.000001;
+    float2 yHash = hash(float2(uvY,uvY));
+    vertical *= sin(uvY*1000.0 * (yHash.x));
+    
+    
+    return clamp(1.0 - vertical,0.,1.);
 }
-
-float filmDirt(vec2 pp, float time) 
-{
-	float aaRad = 0.1;
-	vec2 nseLookup2 = pp + vec2(.5,.9) + time*100.;
-	vec3 nse2 =
-		textureLod(uTexture,.1*nseLookup2.xy,0.).xyz +
-		textureLod(uTexture,.01*nseLookup2.xy,0.).xyz +
-		textureLod(uTexture,.004*nseLookup2.xy+0.4,0.).xyz;
-	float thresh = .6;
-	float mul1 = smoothstep(thresh-aaRad,thresh+aaRad,nse2.x);
-	float mul2 = smoothstep(thresh-aaRad,thresh+aaRad,nse2.y);
-	float mul3 = smoothstep(thresh-aaRad,thresh+aaRad,nse2.z);
-	
-	float seed = textureLod(uTexture,vec2(time*.35,time),0.).x;
-	
-	float result = clamp(0.,1.,seed+.7) + .3*smoothstep(0.,SEQUENCE_LENGTH,time);
-	
-	result += .06*easeIn(19.2,19.4,time);
-
-	float band = .05;
-	if( 0.3 < seed && .3+band > seed )
-		return mul1 * result;
-	if( 0.6 < seed && .6+band > seed )
-		return mul2 * result;
-	if( 0.9 < seed && .9+band > seed )
-		return mul3 * result;
-	return result;
-}
-
-vec4 jumpCut(float seqTime) 
-{
-	float toffset = 0.;
-	vec3 camoffset = vec3(0.);
-	
-	float jct = seqTime;
-	float jct1 = 7.7;
-	float jct2 = 8.2;
-	float jc1 = step( jct1, jct );
-	float jc2 = step( jct2, jct );
-	
-	camoffset += vec3(.8,.0,.0) * jc1;
-	camoffset += vec3(-.8,0.,.0) * jc2;
-	
-	toffset += 0.8 * jc1;
-	toffset -= (jc2-jc1)*(jct-jct1);
-	toffset -= 0.9 * jc2;
-	
-	return vec4(camoffset, toffset);
-}
-
-float limitFPS(float time, float fps) 
-{
-    time = mod(time, SEQUENCE_LENGTH);
-    return float(int(time * fps)) / fps;
-}
-
-vec2 moveImage(vec2 uv, float time) 
-{
-    uv.x += .002 * (cos(time * 3.) * sin(time * 12. + .25));
-    uv.y += .002 * (sin(time * 1. + .5) * cos(time * 15. + .25));
-    return uv;
-}
-
 
 void main()  {
-  vec2 uv = gl_FragCoord.xy / resolution.xy;
-  vec2 qq = -1.0 + 2.0*uv;
-  qq.x *= resolution.x / resolution.y;
-  
-float time = limitFPS(uTime, FPS);
-
-vec4 jumpCutData = jumpCut(time);
-  vec4 dirt = vec4(filmDirt(qq, time + jumpCutData.w));     
-  vec4 image = texture2D(uTexture, moveImage(uv, time));   
-  vec4 vig = vignette(uv, time);
-  
-  gl_FragColor = blackAndWhite(image * dirt * vig);
+    vec2 uv = vUv;
+    float t = iTime;
+    
+    float3 col = float3(0.0,0.0,0.0);
+    col += verticalLine(uv,t)*0.5;
+    col += (1.0 - verticalLine(uv-3.0,t*5.0))*0.5;
+    col *= smoothstep(0.9,0.83, simplexNoise((uv + hash(float2(t,t))*154.4541-154.4541)*10.0));
+    col *= clamp(1.f - hash(uv + t * 0.01f).x * 0.25,0.,1.);
+    col *= smoothstep(1.4,0.0, length(uv-0.5));
+    
+    gl_FragColor = vec4(col*texture(iChannel0,uv).rgb,1.0);
 }
 `;
 
